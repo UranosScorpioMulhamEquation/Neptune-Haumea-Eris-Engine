@@ -35,61 +35,71 @@ if not st.session_state['authenticated']:
         else:
             st.error("Invalid Activation Key.")
     st.stop()
-# ==================== 2. Radar Engine ====================
-Y_HOMO, Y_ERIS, Y_NEPTUNE = 6.18, 9.3, 10.77
-D_HOMO, D_ERIS, D_NEPTUNE = 2257.245, 3396.825, 3933.645
 
-def get_precise_day(target_year, inception_date):
-    start_anchor = date(target_year, inception_date.month, inception_date.day)
-    days_from_inception = (start_anchor - inception_date).days
+# Metadata & UI Setup
+st.set_page_config(page_title="Neptune-Haumea-Eris Personal Radar", layout="wide")
+st.title("Neptune-Haumea-Eris Personal Radar")
+st.markdown("### Developed By Mulham Ahmad.")
+
+def run_usm_engine_daily(birth_date):
+    homo_k = 6.18
+    eris_k = 9.3
+    neptune_k = 10.77
+    tolerance = 0.3
     
-    best_day = start_anchor
-    min_error = float('inf')
+    data = []
     
-    for d in range(-182, 183):
-        current_age_days = days_from_inception + d
-        h_dev = abs((current_age_days / D_HOMO) - round(current_age_days / D_HOMO))
-        e_dev = abs((current_age_days / D_ERIS) - round(current_age_days / D_ERIS))
-        n_dev = abs((current_age_days / D_NEPTUNE) - round(current_age_days / D_NEPTUNE))
-        total_error = h_dev + e_dev + n_dev
+    # التكرار لـ 84 سنة
+    for i in range(1, 85):
+        # 1. حساب الانحرافات (المعادلة الأصلية تعتمد على العمر i)
+        homo_dev = abs((i / homo_k) - round(i / homo_k))
+        eris_dev = abs((i / eris_k) - round(i / eris_k))
+        neptune_dev = abs((i / neptune_k) - round(i / neptune_k))
         
-        if total_error < min_error:
-            min_error = total_error
-            best_day = start_anchor + timedelta(days=d)
-    return best_day
-
-# ==================== 3. Interface ====================
-st.set_page_config(page_title="Neptune-Haumea-Eris Radar", layout="wide")
-st.title("Neptune-Haumea-Eris Precision Radar")
-
-# تحديث النطاق من 1900 إلى 2100 كما طلبت
-inception_date = st.date_input(
-    "Full Inception Date:", 
-    value=date(1981, 4, 17),
-    min_value=date(1900, 1, 1),
-    max_value=date(2100, 12, 31)
-)
-horizon = st.slider("Forecast Horizon (Years):", 10, 100, 50)
-
-if st.button("Execute Radar Analysis"):
-    results = []
-    inception_year = inception_date.year
-    
-    for i in range(1, horizon + 1):
-        age = i
-        h_dev = abs((age / Y_HOMO) - round(age / Y_HOMO))
-        e_dev = abs((age / Y_ERIS) - round(age / Y_ERIS))
-        n_dev = abs((age / Y_NEPTUNE) - round(age / Y_NEPTUNE))
+        status = "CRITICAL" if (homo_dev <= tolerance and eris_dev <= tolerance and neptune_dev <= tolerance) else "Normal"
         
-        if h_dev <= 0.3 and e_dev <= 0.3 and n_dev <= 0.3:
-            target_year = inception_year + i
-            critical_date = get_precise_day(target_year, inception_date)
-            results.append({
-                "Age": age,
-                "Critical Date": critical_date.strftime('%d/%m/%Y')
-            })
+        # 2. تطبيق منطق الجمع المركب:
+        # تاريخ الخطر = (تاريخ الميلاد) + (انحرافات المعادلة)
+        # نحول الانحرافات إلى أيام وشهور لإضافتها لتاريخ الميلاد
+        offset_day = int(eris_dev * 30)
+        offset_month = int(homo_dev * 12)
+        
+        # حساب السنة المستهدفة
+        target_year = birth_date.year + i
+        
+        # الجمع المركب مع الترحيل (Carry-over)
+        new_day = birth_date.day + offset_day
+        new_month = birth_date.month + offset_month
+        new_year = target_year
+        
+        # معالجة الفائض (أيام لأشهر، وأشهر لسنوات)
+        while new_day > 30: # تبسيط الحساب للأيام
+            new_day -= 30
+            new_month += 1
+        
+        while new_month > 12:
+            new_month -= 12
+            new_year += 1
             
-    if results:
-        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        risk_date_str = f"{new_year}-{new_month:02d}-{new_day:02d}"
+        
+        data.append([risk_date_str, i, round(homo_dev, 4), round(eris_dev, 4), round(neptune_dev, 4), status])
+        
+    return pd.DataFrame(data, columns=["Risk Date", "Age (Year)", "Homo Dev", "Eris Dev", "Neptune Dev", "Status"])
+
+# UI Layout
+birth_date = st.date_input("Select Inception/Birth Date", value=date(1981, 4, 17), min_value=date(1900, 1, 1), max_value=date(2099, 12, 31))
+
+if st.button("Execute Daily Radar Analysis"):
+    df = run_usm_engine_daily(birth_date)
+    
+    # تنسيق النتائج
+    def color_status(val):
+        return 'background-color: red; color: white' if val == 'CRITICAL' else 'background-color: green; color: white'
+    
+    styled_df = df.style.map(color_status, subset=['Status'])
+    
+    if not df.empty:
+        st.dataframe(styled_df, use_container_width=True, height=500)
     else:
-        st.warning("No critical resonance found.")
+        st.warning("No CRITICAL dates found in 84-year horizon.")
